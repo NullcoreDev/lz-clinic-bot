@@ -2,14 +2,13 @@ package main
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"tg-bot/internal/booking"
 	"tg-bot/internal/catalog"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func handleMessage(
@@ -28,7 +27,6 @@ func handleMessage(
 	}
 
 	switch text {
-
 	case "/start":
 		handleStart(bot, chatID, user)
 
@@ -65,24 +63,24 @@ func handleMessage(
 	case "Игнатенкова Эльвира Ильгизовна":
 		handleDoctor(bot, chatID, user, 3, bookingService)
 
-	case "10:00", "11:00", "12:00", "14:00", "15:00", "16:00":
-		handleTime(bot, chatID, user, text)
-
 	case "✅ Подтвердить запись":
 		handleConfirm(bot, chatID, user, bookingService)
 
 	default:
-		if user.Step == "date" {
-			handleDate(bot, chatID, user, text)
+		switch user.Step {
+		case "date":
+			handleDate(bot, chatID, user, text, bookingService)
 			return
-		}
 
-		if user.Step == "patient_name" {
+		case "time":
+			handleTime(bot, chatID, user, text, bookingService)
+			return
+
+		case "patient_name":
 			handlePatientName(bot, chatID, user, text)
 			return
-		}
 
-		if user.Step == "phone" {
+		case "phone":
 			handlePhone(bot, chatID, user, text)
 			return
 		}
@@ -102,10 +100,7 @@ func handleStart(
 	chatID int64,
 	user *UserState,
 ) {
-	user.Step = ""
-	user.Booking = Booking{}
-	user.PatientName = ""
-	user.Phone = ""
+	resetUser(user)
 
 	msg := tgbotapi.NewMessage(
 		chatID,
@@ -115,7 +110,6 @@ func handleStart(
 	)
 
 	msg.ReplyMarkup = mainKeyboard()
-
 	bot.Send(msg)
 }
 
@@ -124,10 +118,9 @@ func handleStartBooking(
 	chatID int64,
 	user *UserState,
 ) {
+	resetUser(user)
+
 	user.Step = "service"
-	user.Booking = Booking{}
-	user.PatientName = ""
-	user.Phone = ""
 
 	msg := tgbotapi.NewMessage(
 		chatID,
@@ -135,7 +128,6 @@ func handleStartBooking(
 	)
 
 	msg.ReplyMarkup = serviceKeyboard()
-
 	bot.Send(msg)
 }
 
@@ -155,20 +147,22 @@ func handleService(
 
 	user.Booking.ServiceID = serviceID
 	user.Booking.DoctorID = 0
+	user.Booking.Date = ""
+	user.Booking.Time = ""
 	user.Step = "doctor"
 
 	doctors := bookingService.GetDoctors(serviceID)
+
+	if len(doctors) == 0 {
+		sendError(bot, chatID, "Для этой услуги пока нет доступных врачей.")
+		return
+	}
 
 	var text strings.Builder
 
 	text.WriteString("Вы выбрали:\n")
 	text.WriteString("🩺 " + service.Name + "\n\n")
 	text.WriteString("Теперь выберите врача:")
-
-	if len(doctors) == 0 {
-		sendError(bot, chatID, "Для этой услуги пока нет доступных врачей.")
-		return
-	}
 
 	msg := tgbotapi.NewMessage(chatID, text.String())
 	msg.ReplyMarkup = doctorKeyboard(serviceID)
@@ -190,7 +184,30 @@ func handleDoctor(
 		return
 	}
 
+	if user.Booking.ServiceID == 0 {
+		sendError(bot, chatID, "Сначала выберите направление.")
+		return
+	}
+
+	doctors := bookingService.GetDoctors(user.Booking.ServiceID)
+
+	doctorAvailable := false
+
+	for _, item := range doctors {
+		if item.ID == doctorID {
+			doctorAvailable = true
+			break
+		}
+	}
+
+	if !doctorAvailable {
+		sendError(bot, chatID, "Этот врач недоступен для выбранного направления.")
+		return
+	}
+
 	user.Booking.DoctorID = doctorID
+	user.Booking.Date = ""
+	user.Booking.Time = ""
 	user.Step = "date"
 
 	msg := tgbotapi.NewMessage(
@@ -202,7 +219,6 @@ func handleDoctor(
 	)
 
 	msg.ReplyMarkup = dateKeyboard()
-
 	bot.Send(msg)
 }
 
@@ -211,6 +227,7 @@ func handleDate(
 	chatID int64,
 	user *UserState,
 	text string,
+	bookingService *booking.BookingService,
 ) {
 	text = strings.TrimPrefix(text, "📅 ")
 	text = strings.TrimSpace(text)
@@ -228,7 +245,30 @@ func handleDate(
 		return
 	}
 
-	if parsedDate.Before(time.Now().Truncate(24 * time.Hour)) {
+	now := time.Now()
+	today := time.Date(
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		0,
+		0,
+		0,
+		0,
+		now.Location(),
+	)
+
+	selectedDate := time.Date(
+		parsedDate.Year(),
+		parsedDate.Month(),
+		parsedDate.Day(),
+		0,
+		0,
+		0,
+		0,
+		now.Location(),
+	)
+
+	if selectedDate.Before(today) {
 		msg := tgbotapi.NewMessage(
 			chatID,
 			"Эта дата уже прошла. Выберите другую.",
@@ -239,17 +279,43 @@ func handleDate(
 		return
 	}
 
-	user.Booking.Date = parsedDate.Format("02.01.2006")
+	user.Booking.Date = selectedDate.Format("02.01.2006")
+
+	availableTimes, err := bookingService.GetAvailableTimes(
+		user.Booking.DoctorID,
+		user.Booking.Date,
+	)
+
+	if err != nil {
+		sendError(bot, chatID, "Не удалось получить доступное время.")
+		return
+	}
+
+	if len(availableTimes) == 0 {
+		msg := tgbotapi.NewMessage(
+			chatID,
+			"На выбранную дату свободных записей у этого врача нет.\n\n"+
+				"Выберите другую дату:",
+		)
+
+		msg.ReplyMarkup = dateKeyboard()
+		bot.Send(msg)
+
+		user.Booking.Time = ""
+		user.Step = "date"
+
+		return
+	}
+
 	user.Step = "time"
 
 	msg := tgbotapi.NewMessage(
 		chatID,
 		"Дата: "+user.Booking.Date+
-			"\n\nВыберите время:",
+			"\n\nВыберите свободное время:",
 	)
 
-	msg.ReplyMarkup = timeKeyboard()
-
+	msg.ReplyMarkup = timeKeyboard(availableTimes)
 	bot.Send(msg)
 }
 
@@ -258,7 +324,48 @@ func handleTime(
 	chatID int64,
 	user *UserState,
 	timeValue string,
+	bookingService *booking.BookingService,
 ) {
+	timeValue = strings.TrimSpace(timeValue)
+
+	_, err := time.Parse("15:04", timeValue)
+
+	if err != nil {
+		sendError(bot, chatID, "Пожалуйста, выберите время кнопкой.")
+		return
+	}
+
+	availableTimes, err := bookingService.GetAvailableTimes(
+		user.Booking.DoctorID,
+		user.Booking.Date,
+	)
+
+	if err != nil {
+		sendError(bot, chatID, "Не удалось проверить доступность времени.")
+		return
+	}
+
+	isAvailable := false
+
+	for _, availableTime := range availableTimes {
+		if availableTime == timeValue {
+			isAvailable = true
+			break
+		}
+	}
+
+	if !isAvailable {
+		msg := tgbotapi.NewMessage(
+			chatID,
+			"Это время уже занято или недоступно.\n\n"+
+				"Выберите другое время:",
+		)
+
+		msg.ReplyMarkup = timeKeyboard(availableTimes)
+		bot.Send(msg)
+		return
+	}
+
 	user.Booking.Time = timeValue
 	user.Step = "patient_name"
 
@@ -269,7 +376,6 @@ func handleTime(
 	)
 
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-
 	bot.Send(msg)
 }
 
@@ -279,7 +385,9 @@ func handlePatientName(
 	user *UserState,
 	name string,
 ) {
-	if len(name) < 2 {
+	name = strings.TrimSpace(name)
+
+	if len([]rune(name)) < 2 {
 		bot.Send(tgbotapi.NewMessage(
 			chatID,
 			"Пожалуйста, введите имя и фамилию.",
@@ -304,7 +412,9 @@ func handlePhone(
 	user *UserState,
 	phone string,
 ) {
-	if len(phone) < 5 {
+	phone = strings.TrimSpace(phone)
+
+	if len([]rune(phone)) < 5 {
 		bot.Send(tgbotapi.NewMessage(
 			chatID,
 			"Похоже, номер слишком короткий. Введите номер телефона ещё раз.",
@@ -392,10 +502,7 @@ func handleConfirm(
 		appointment.Phone,
 	)
 
-	user.Step = ""
-	user.Booking = Booking{}
-	user.PatientName = ""
-	user.Phone = ""
+	resetUser(user)
 
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = mainKeyboard()
@@ -408,7 +515,12 @@ func handleMyBookings(
 	chatID int64,
 	bookingService *booking.BookingService,
 ) {
-	appointments := bookingService.GetUserAppointments(chatID)
+	appointments, err := bookingService.GetUserAppointments(chatID)
+
+	if err != nil {
+		sendError(bot, chatID, "Не удалось получить ваши записи.")
+		return
+	}
 
 	if len(appointments) == 0 {
 		msg := tgbotapi.NewMessage(
@@ -477,7 +589,6 @@ func handleBack(
 	bookingService *booking.BookingService,
 ) {
 	switch user.Step {
-
 	case "service":
 		handleStart(bot, chatID, user)
 
@@ -505,6 +616,7 @@ func handleBack(
 
 	case "time":
 		user.Step = "date"
+		user.Booking.Time = ""
 
 		msg := tgbotapi.NewMessage(
 			chatID,
@@ -515,14 +627,33 @@ func handleBack(
 		bot.Send(msg)
 
 	case "patient_name":
+		availableTimes, err := bookingService.GetAvailableTimes(
+			user.Booking.DoctorID,
+			user.Booking.Date,
+		)
+
+		if err != nil {
+			user.Step = "date"
+
+			msg := tgbotapi.NewMessage(
+				chatID,
+				"Не удалось получить время.\n\nВыберите дату:",
+			)
+
+			msg.ReplyMarkup = dateKeyboard()
+			bot.Send(msg)
+			return
+		}
+
 		user.Step = "time"
+		user.Booking.Time = ""
 
 		msg := tgbotapi.NewMessage(
 			chatID,
-			"Выберите время:",
+			"Выберите свободное время:",
 		)
 
-		msg.ReplyMarkup = timeKeyboard()
+		msg.ReplyMarkup = timeKeyboard(availableTimes)
 		bot.Send(msg)
 
 	case "phone":
@@ -555,19 +686,22 @@ func handleCancel(
 	chatID int64,
 	user *UserState,
 ) {
+	resetUser(user)
+
+	msg := tgbotapi.NewMessage(
+		chatID,
+		"❌ Запись отменена.\n\nВы вернулись в главное меню.",
+	)
+
+	msg.ReplyMarkup = mainKeyboard()
+	bot.Send(msg)
+}
+
+func resetUser(user *UserState) {
 	user.Step = ""
 	user.Booking = Booking{}
 	user.PatientName = ""
 	user.Phone = ""
-
-	msg := tgbotapi.NewMessage(
-		chatID,
-		"❌ Запись отменена.\n\nВыберите действие:",
-	)
-
-	msg.ReplyMarkup = mainKeyboard()
-
-	bot.Send(msg)
 }
 
 func sendError(
@@ -576,10 +710,5 @@ func sendError(
 	text string,
 ) {
 	msg := tgbotapi.NewMessage(chatID, "❌ "+text)
-	msg.ReplyMarkup = mainKeyboard()
 	bot.Send(msg)
-}
-
-func parseID(value string) (int64, error) {
-	return strconv.ParseInt(value, 10, 64)
 }
