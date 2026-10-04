@@ -1,9 +1,14 @@
 package main
 
-import tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+import (
+	"fmt"
+	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
 
 func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📅 Записаться на приём"),
 		),
@@ -12,33 +17,65 @@ func mainKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("ℹ️ Информация"),
 		),
 	)
+
+	keyboard.ResizeKeyboard = true
+
+	return keyboard
 }
 
 func serviceKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("🦷 Лечение зубов"),
-			tgbotapi.NewKeyboardButton("🧼 Профессиональная чистка"),
+			tgbotapi.NewKeyboardButton("🧠 Неврология"),
+			tgbotapi.NewKeyboardButton("❤️ Кардиология"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("🦷 Удаление зуба"),
-			tgbotapi.NewKeyboardButton("🔍 Консультация"),
+			tgbotapi.NewKeyboardButton("🩺 Терапия"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("⬅️ Назад"),
 		),
 	)
+
+	keyboard.ResizeKeyboard = true
+
+	return keyboard
 }
 
-func doctorKeyboard() tgbotapi.ReplyKeyboardMarkup {
+func doctorKeyboard(serviceID int64) tgbotapi.ReplyKeyboardMarkup {
+	switch serviceID {
+	case 1:
+		return tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Раков Александр Михайлович"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("⬅️ Назад"),
+			),
+		)
+
+	case 2:
+		return tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Гуревич Оксана Васильевна"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("⬅️ Назад"),
+			),
+		)
+
+	case 3:
+		return tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Игнатенкова Эльвира Ильгизовна"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("⬅️ Назад"),
+			),
+		)
+	}
+
 	return tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("👨‍⚕️ Иванов И.И."),
-			tgbotapi.NewKeyboardButton("👩‍⚕️ Петрова А.А."),
-		),
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("👨‍⚕️ Сидоров Д.С."),
-		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("⬅️ Назад"),
 		),
@@ -46,30 +83,45 @@ func doctorKeyboard() tgbotapi.ReplyKeyboardMarkup {
 }
 
 func dateKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("📅 6 октября"),
-			tgbotapi.NewKeyboardButton("📅 7 октября"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("📅 8 октября"),
-			tgbotapi.NewKeyboardButton("📅 9 октября"),
-		),
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("⬅️ Назад"),
-		),
-	)
+	now := time.Now()
+
+	rows := make([][]tgbotapi.KeyboardButton, 0, 5)
+
+	for i := 1; i <= 4; i++ {
+		date := now.AddDate(0, 0, i)
+
+		button := tgbotapi.NewKeyboardButton(
+			fmt.Sprintf("📅 %s", date.Format("02.01.2006")),
+		)
+
+		rows = append(rows, []tgbotapi.KeyboardButton{
+			button,
+		})
+	}
+
+	rows = append(rows, []tgbotapi.KeyboardButton{
+		tgbotapi.NewKeyboardButton("⬅️ Назад"),
+	})
+
+	keyboard := tgbotapi.ReplyKeyboardMarkup{
+		Keyboard:       rows,
+		ResizeKeyboard: true,
+	}
+
+	return keyboard
 }
 
 func timeKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("10:00"),
 			tgbotapi.NewKeyboardButton("11:00"),
-			tgbotapi.NewKeyboardButton("12:00"),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("12:00"),
 			tgbotapi.NewKeyboardButton("14:00"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("15:00"),
 			tgbotapi.NewKeyboardButton("16:00"),
 		),
@@ -77,10 +129,14 @@ func timeKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("⬅️ Назад"),
 		),
 	)
+
+	keyboard.ResizeKeyboard = true
+
+	return keyboard
 }
 
 func confirmKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+	keyboard := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("✅ Подтвердить запись"),
 		),
@@ -88,4 +144,8 @@ func confirmKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton("❌ Отменить"),
 		),
 	)
+
+	keyboard.ResizeKeyboard = true
+
+	return keyboard
 }
