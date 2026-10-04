@@ -1,0 +1,16 @@
+# Environment variables
+.env
+
+# Go build files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
